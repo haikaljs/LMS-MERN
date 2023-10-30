@@ -200,12 +200,14 @@ export const updateAccessToken = CatchAsyncError(
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const refresh_token = req.cookies.refresh_token as string;
+
       const decoded = jwt.verify(
         refresh_token,
         process.env.REFRESH_TOKEN as string
       ) as JwtPayload;
 
       const message = "Could not refresh token";
+
       if (!decoded) {
         return next(new ErrorHandler(message, 400));
       }
@@ -214,7 +216,9 @@ export const updateAccessToken = CatchAsyncError(
       if (!session) {
         return next(new ErrorHandler(message, 400));
       }
+
       const user = JSON.parse(session);
+
       const accessToken = jwt.sign(
         { id: user._id },
         process.env.ACCESS_TOKEN as string,
@@ -231,8 +235,11 @@ export const updateAccessToken = CatchAsyncError(
         }
       );
 
+      req.user = user;
+
       res.cookie("access_token", accessToken, accessTokenOptions);
       res.cookie("refresh_token", refreshToken, refreshTokenOptions);
+
       res.status(200).json({
         status: "success",
         accessToken,
@@ -256,13 +263,11 @@ export const getUserInfo = CatchAsyncError(
 );
 
 // social auth
-interface ISocialAuthBody{
-  name: string,
-  email: string,
-  avatar: string
-
+interface ISocialAuthBody {
+  name: string;
+  email: string;
+  avatar: string;
 }
-
 
 export const socialAuth = CatchAsyncError(
   async (req: Request, res: Response, next: NextFunction) => {
@@ -277,9 +282,43 @@ export const socialAuth = CatchAsyncError(
         });
 
         sendToken(newUser, 200, res);
-      }else{
-        sendToken(user, 200, res)
+      } else {
+        sendToken(user, 200, res);
       }
+    } catch (error: any) {
+      return next(new ErrorHandler(error.message, 400));
+    }
+  }
+);
+
+// update user info
+interface IUpdateUserInfo {
+  name?: string;
+  email?: string;
+}
+
+export const updateUserInfo = CatchAsyncError(
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { name, email } = req.body as IUpdateUserInfo;
+      const userId = req.user?._id;
+      const user = await userModel.findById(userId);
+      if (email && user) {
+        const isEmailExist = await userModel.findOne({ email });
+        if (isEmailExist) {
+          return next(new ErrorHandler("Email already exist", 400));
+        }
+        user.email = email;
+      }
+      if (name && user) {
+        user.name = name;
+      }
+      await user?.save();
+      await redis.set(userId, JSON.stringify(user));
+      res.status(201).json({
+        status: true,
+        user,
+      });
     } catch (error: any) {
       return next(new ErrorHandler(error.message, 400));
     }
